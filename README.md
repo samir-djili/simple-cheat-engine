@@ -32,5 +32,5 @@ A graphical tool for scanning and modifying memory values in Windows processes. 
 ## Building from Source 🔨
 ```bash
 git clone https://github.com/samir-djili/simple-cheat-engine.git
-cd windows-memory-scanner
+cd simple-cheat-engine
 gcc -o MemoryScanner main.c -luser32 -lgdi32 -lcomctl32
