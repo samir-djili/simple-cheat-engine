@@ -29,8 +29,14 @@ A graphical tool for scanning and modifying memory values in Windows processes. 
 
 ![Interface Preview](screenshots/interface.png) <!-- Add screenshot later -->
 
+Ethical Note:
+This tool is strictly for educational purposes on authorized processes. Includes safety checks to prevent accidental system modifications.
+
 ## Building from Source 🔨
 ```bash
 git clone https://github.com/samir-djili/simple-cheat-engine.git
 cd simple-cheat-engine
 gcc -o MemoryScanner main.c -luser32 -lgdi32 -lcomctl32
+
+
+
