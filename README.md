@@ -18,7 +18,7 @@ A graphical tool for scanning and modifying memory values in Windows processes. 
    - [MinGW-w64](https://www.mingw-w64.org/) (for compilation)
 
 2. **Pre-built Binary**:
-   Download latest release from [Releases page](https://github.com/yourusername/windows-memory-scanner/releases)
+   Download latest release from [Releases page](https://github.com/samir-djili/simple-cheat-engine)
 
 ## Usage 🛠️
 1. Select a process from the list
