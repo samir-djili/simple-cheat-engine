@@ -1,3 +1,30 @@
+/*
+Windows Memory Scanner - A simple process memory scanner and editor
+
+Features:
+- List running processes
+- Select a process to scan
+- Scan for integer values in writable memory regions
+- Rescan previous results to narrow down values
+- Paginated results view
+- Write new values to selected/all addresses
+
+Usage:
+1. Select a process from the list
+2. Enter initial value to scan for
+3. Click "Scan" to find all occurrences
+4. Refine results with "Rescan" after value changes
+5. Write new values using "Write Selected" or "Write All"
+
+Note: This is a basic demonstration - real memory scanners require:
+- Better error handling
+- Support for different data types
+- Cheat engine-like features (fuzzy search, value tracking)
+- Memory protection handling
+- 64-bit compatibility
+*/
+
+// Force 8-byte packing for Windows headers to ensure structure alignment
 #pragma pack(push, 8)
 #include <windows.h>
 #include <tlhelp32.h>
@@ -5,19 +32,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define PAGE_SIZE 10
+#define PAGE_SIZE 10  // Number of results to show per page
 
+// Structure to store memory address and value pairs
 typedef struct {
-    LPVOID address;
-    int value;
+    LPVOID address;  // Memory address in target process
+    int value;       // Value found at this address
 } MemoryEntry;
 
-MemoryEntry* foundAddresses = NULL;
-size_t foundCount = 0;
-size_t currentPage = 0;
-DWORD processID = 0;
+// Global state variables
+MemoryEntry* foundAddresses = NULL;  // Dynamic array of found addresses
+size_t foundCount = 0;               // Number of found addresses
+size_t currentPage = 0;              // Current pagination page
+DWORD processID = 0;                 // Currently selected process ID
 
-// Control handles
+// GUI Control handles
 HWND hwndProcList, hwndResultList, hwndScanBtn, hwndRescanBtn, hwndWriteBtn,
      hwndExitBtn, hwndInput, hwndNextPage, hwndPrevPage, hwndPageInfo,
      hwndSelectBtn, hwndReturnBtn , hwndWriteInput, hwndWriteSelectedBtn;
@@ -32,8 +61,10 @@ void UpdatePagination();
 void ClearResults();
 void RescanMemory(int newValue);
 
+// Application entry point
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                   LPSTR lpCmdLine, int nCmdShow) {
+    // Register window class
     WNDCLASSW wc = {0};
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = hInstance;
@@ -41,12 +72,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     if (!RegisterClassW(&wc)) return 0;
 
+    // Create main window
     HWND hwnd = CreateWindowW(L"MemoryScannerClass", L"Memory Scanner",
                              WS_OVERLAPPEDWINDOW | WS_VISIBLE,
                              CW_USEDEFAULT, CW_USEDEFAULT,
                              650, 450, NULL, NULL, hInstance, NULL);
     if (!hwnd) return 0;
 
+    // Main message loop
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
         TranslateMessage(&msg);
@@ -55,10 +88,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     return (int)msg.wParam;
 }
 
+// Main window procedure handling messages and events
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
         case WM_CREATE:
-            // Process selection controls
+            // Initialize GUI controls
+            // Process list and selection controls
             hwndProcList = CreateWindowW(L"LISTBOX", NULL,
                             WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL | LBS_NOTIFY | LBS_HASSTRINGS,
                             10, 10, 620, 200, hwnd, (HMENU)1, NULL, NULL);
@@ -68,7 +103,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             hwndExitBtn = CreateWindowW(L"BUTTON", L"Exit", WS_CHILD | WS_VISIBLE,
                                       550, 220, 80, 30, hwnd, (HMENU)3, NULL, NULL);
 
-            // Memory operation controls (initially hidden)
+            // Memory scanning controls (initially hidden)
             hwndResultList = CreateWindowW(L"LISTBOX", NULL, WS_CHILD | WS_VSCROLL,
                                          10, 10, 620, 200, hwnd, (HMENU)4, NULL, NULL);
 
@@ -98,18 +133,20 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             hwndPageInfo = CreateWindowW(L"STATIC", L"Page 1/1", WS_CHILD,
                                       200, 280, 200, 25, hwnd, (HMENU)12, NULL, NULL);
 
+            // Initial setup
             ListProcesses();
             ShowProcessSelection(hwnd);
             break;
 
         case WM_COMMAND: {
             int cmd = LOWORD(wParam);
-            if (cmd == 2) { // Select Process
+            if (cmd == 2) { // Select Process button
                 int index = SendMessageW(hwndProcList, LB_GETCURSEL, 0, 0);
                 if (index != LB_ERR) {
                     wchar_t buffer[256];
                     SendMessageW(hwndProcList, LB_GETTEXT, index, (LPARAM)buffer);
 
+                    // Extract PID from listbox string format: "Process (PID: 1234)"
                     wchar_t* pidStart = wcsstr(buffer, L"(PID: ");
                     if (pidStart) {
                         processID = _wtoi(pidStart + 6);
@@ -117,60 +154,58 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     }
                 }
             }
-            else if (cmd == 3) PostQuitMessage(0);
-            else if (cmd == 6) { // Scan
+            else if (cmd == 3) PostQuitMessage(0); // Exit button
+            else if (cmd == 6) { // Scan button
                 wchar_t buffer[32];
                 GetWindowTextW(hwndInput, buffer, 32);
                 ScanMemory(_wtoi(buffer));
             }
-            else if (cmd == 7) { // Rescan
+            else if (cmd == 7) { // Rescan button
                 wchar_t buffer[32];
                 GetWindowTextW(hwndInput, buffer, 32);
                 RescanMemory(_wtoi(buffer));
             }
-            else if (cmd == 9) { // Return
+            else if (cmd == 9) { // Return to process list
                 ClearResults();
                 ShowProcessSelection(hwnd);
             }
-            else if (cmd == 14) { // Write Selected
-                    int index = SendMessageW(hwndResultList, LB_GETCURSEL, 0, 0);
-                    if (index >= 0 && index < (int)foundCount) {
-                        wchar_t valueBuffer[32];
-                        GetWindowTextW(hwndWriteInput, valueBuffer, 32);
-                        int newValue = _wtoi(valueBuffer);
+            else if (cmd == 14) { // Write Selected button
+                int index = SendMessageW(hwndResultList, LB_GETCURSEL, 0, 0);
+                if (index >= 0 && index < (int)foundCount) {
+                    wchar_t valueBuffer[32];
+                    GetWindowTextW(hwndWriteInput, valueBuffer, 32);
+                    int newValue = _wtoi(valueBuffer);
 
-                        HANDLE hProcess = OpenProcess(PROCESS_VM_WRITE | PROCESS_VM_OPERATION,
-                                                    FALSE, processID);
-                        if (hProcess) {
-                            SIZE_T bytesWritten;
-                            LPVOID address = foundAddresses[index].address;
-                            if (WriteProcessMemory(hProcess, address, &newValue,
-                                                  sizeof(newValue), &bytesWritten)) {
-                                MessageBoxW(hwnd, L"Value written successfully!",
-                                          L"Success", MB_OK);
-                                // Update local copy of the value
-                                foundAddresses[index].value = newValue;
-                            }
-                            else {
-                                MessageBoxW(hwnd, L"Failed to write memory!",
-                                          L"Error", MB_ICONERROR);
-                            }
-                            CloseHandle(hProcess);
+                    // Open process with write permissions
+                    HANDLE hProcess = OpenProcess(PROCESS_VM_WRITE | PROCESS_VM_OPERATION,
+                                                FALSE, processID);
+                    if (hProcess) {
+                        SIZE_T bytesWritten;
+                        LPVOID address = foundAddresses[index].address;
+                        if (WriteProcessMemory(hProcess, address, &newValue,
+                                              sizeof(newValue), &bytesWritten)) {
+                            MessageBoxW(hwnd, L"Value written successfully!",
+                                      L"Success", MB_OK);
+                            // Update local copy to maintain consistency
+                            foundAddresses[index].value = newValue;
                         }
                         else {
-                            MessageBoxW(hwnd, L"Failed to open process!",
+                            MessageBoxW(hwnd, L"Failed to write memory!",
                                       L"Error", MB_ICONERROR);
                         }
+                        CloseHandle(hProcess);
                     }
                     else {
-                        MessageBoxW(hwnd, L"Select an address first!",
+                        MessageBoxW(hwnd, L"Failed to open process!",
                                   L"Error", MB_ICONERROR);
                     }
                 }
-
-
-            // Update the Write button handler (command 8) to write to all addresses
-            else if (cmd == 8) { // Write All
+                else {
+                    MessageBoxW(hwnd, L"Select an address first!",
+                              L"Error", MB_ICONERROR);
+                }
+            }
+            else if (cmd == 8) { // Write All button
                 wchar_t valueBuffer[32];
                 GetWindowTextW(hwndWriteInput, valueBuffer, 32);
                 int newValue = _wtoi(valueBuffer);
@@ -179,6 +214,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                                             FALSE, processID);
                 if (hProcess) {
                     SIZE_T bytesWritten;
+                    // Iterate through all found addresses and update them
                     for (size_t i = 0; i < foundCount; i++) {
                         if (WriteProcessMemory(hProcess, foundAddresses[i].address, &newValue,
                                               sizeof(newValue), &bytesWritten)) {
@@ -192,11 +228,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     MessageBoxW(hwnd, L"Failed to open process!", L"Error", MB_ICONERROR);
                 }
             }
-            else if (cmd == 10) { // Prev Page
+            else if (cmd == 10) { // Previous Page button
                 if (currentPage > 0) currentPage--;
                 UpdatePagination();
             }
-            else if (cmd == 11) { // Next Page
+            else if (cmd == 11) { // Next Page button
                 if ((currentPage + 1) * PAGE_SIZE < foundCount) currentPage++;
                 UpdatePagination();
             }
@@ -204,6 +240,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         }
 
         case WM_DESTROY:
+            // Cleanup dynamically allocated memory
             free(foundAddresses);
             PostQuitMessage(0);
             break;
@@ -214,14 +251,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     return 0;
 }
 
-// Update ShowProcessSelection and ShowMemoryControls
+// Show process selection UI elements
 void ShowProcessSelection(HWND hwnd) {
-    // Show process selection controls
+    // Toggle visibility of controls
     ShowWindow(hwndProcList, SW_SHOW);
     ShowWindow(hwndSelectBtn, SW_SHOW);
     ShowWindow(hwndExitBtn, SW_SHOW);
 
-    // Hide all memory operation controls
+    // Hide memory operation controls
     ShowWindow(hwndResultList, SW_HIDE);
     ShowWindow(hwndInput, SW_HIDE);
     ShowWindow(hwndScanBtn, SW_HIDE);
@@ -234,11 +271,12 @@ void ShowProcessSelection(HWND hwnd) {
     ShowWindow(hwndWriteInput, SW_HIDE);
     ShowWindow(hwndWriteSelectedBtn, SW_HIDE);
 
-    // Refresh the window
+    // Force window redraw
     InvalidateRect(hwnd, NULL, TRUE);
     UpdateWindow(hwnd);
 }
 
+// Show memory scanning/editing UI elements
 void ShowMemoryControls(HWND hwnd)  {
     // Hide process selection controls
     ShowWindow(hwndProcList, SW_HIDE);
@@ -258,11 +296,12 @@ void ShowMemoryControls(HWND hwnd)  {
     ShowWindow(hwndWriteInput, SW_SHOW);
     ShowWindow(hwndWriteSelectedBtn, SW_SHOW);
 
-    // Refresh the window
+    // Force window redraw
     InvalidateRect(hwnd, NULL, TRUE);
     UpdateWindow(hwnd);
 }
 
+// Populate process list using Toolhelp32 snapshot
 void ListProcesses() {
     SendMessageW(hwndProcList, LB_RESETCONTENT, 0, 0);
 
@@ -274,11 +313,11 @@ void ListProcesses() {
 
     if (Process32First(hSnap, &pe)) {
         do {
-            // Convert ANSI process name to wide char
+            // Convert ANSI process name to wide characters
             wchar_t wideName[MAX_PATH];
             MultiByteToWideChar(CP_ACP, 0, pe.szExeFile, -1, wideName, MAX_PATH);
 
-            // Create display string with PID
+            // Format process entry with PID
             wchar_t buffer[256];
             swprintf(buffer, 256, L"%s (PID: %d)", pe.szExeFile, pe.th32ProcessID);
 
@@ -288,6 +327,8 @@ void ListProcesses() {
     }
     CloseHandle(hSnap);
 }
+
+// Perform initial memory scan for target value
 void ScanMemory(int targetValue) {
     ClearResults();
 
@@ -301,14 +342,18 @@ void ScanMemory(int targetValue) {
     MEMORY_BASIC_INFORMATION mbi;
     LPVOID address = 0;
 
+    // Iterate through memory regions
     while (VirtualQueryEx(hProcess, address, &mbi, sizeof(mbi))) {
+        // Only scan committed, readable/writable memory
         if (mbi.State == MEM_COMMIT && (mbi.Protect & PAGE_READWRITE)) {
             BYTE* buffer = (BYTE*)malloc(mbi.RegionSize);
             SIZE_T bytesRead;
             if (ReadProcessMemory(hProcess, mbi.BaseAddress, buffer,
                                  mbi.RegionSize, &bytesRead)) {
+                // Scan each integer in the memory block
                 for (SIZE_T i = 0; i < bytesRead; i += sizeof(int)) {
                     if (*(int*)(buffer + i) == targetValue) {
+                        // Add matching address to results
                         foundAddresses = (MemoryEntry*)realloc(foundAddresses,
                                           (foundCount + 1) * sizeof(MemoryEntry));
                         foundAddresses[foundCount].address =
@@ -320,6 +365,7 @@ void ScanMemory(int targetValue) {
             }
             free(buffer);
         }
+        // Move to next memory region
         address = (LPVOID)((DWORD_PTR)mbi.BaseAddress + mbi.RegionSize);
     }
 
@@ -328,25 +374,30 @@ void ScanMemory(int targetValue) {
     UpdatePagination();
 }
 
+// Update pagination controls and result display
 void UpdatePagination() {
     SendMessageW(hwndResultList, LB_RESETCONTENT, 0, 0);
 
+    // Calculate page boundaries
     size_t start = currentPage * PAGE_SIZE;
     size_t end = start + PAGE_SIZE;
     if (end > foundCount) end = foundCount;
 
+    // Add current page items to listbox
     for (size_t i = start; i < end; i++) {
         wchar_t buffer[32];
         swprintf(buffer, 32, L"0x%p", foundAddresses[i].address);
         SendMessageW(hwndResultList, LB_ADDSTRING, 0, (LPARAM)buffer);
     }
 
+    // Update page info text
     int totalPages = (foundCount + PAGE_SIZE - 1) / PAGE_SIZE;
     wchar_t pageInfo[32];
     swprintf(pageInfo, 32, L"Page %d/%d", currentPage + 1, totalPages ? totalPages : 1);
     SetWindowTextW(hwndPageInfo, pageInfo);
 }
 
+// Reset scan results and UI
 void ClearResults() {
     free(foundAddresses);
     foundAddresses = NULL;
@@ -356,6 +407,7 @@ void ClearResults() {
     SetWindowTextW(hwndPageInfo, L"Page 1/1");
 }
 
+// Narrow down results by rescanning previous matches
 void RescanMemory(int newValue) {
     if (!foundCount || !processID) return;
 
@@ -368,15 +420,18 @@ void RescanMemory(int newValue) {
     SIZE_T bytesRead;
     size_t newCount = 0;
 
+    // Check each previously found address for the new value
     for (size_t i = 0; i < foundCount; i++) {
         int currentValue;
         if (ReadProcessMemory(hProcess, foundAddresses[i].address, &currentValue,
                             sizeof(currentValue), &bytesRead) &&
             currentValue == newValue) {
+            // Keep addresses that still match
             foundAddresses[newCount++] = foundAddresses[i];
         }
     }
 
+    // Update results
     foundCount = newCount;
     foundAddresses = (MemoryEntry*)realloc(foundAddresses, foundCount * sizeof(MemoryEntry));
     CloseHandle(hProcess);
