@@ -1,4 +1,4 @@
-# Windows Memory Scanner 🔍
+# simple-cheat-engine (Windows Memory Scanner) 🔍
 
 ![Windows Memory Scanner Demo](screenshots/demo.gif) <!-- Add screenshot later -->
 
